@@ -5,7 +5,9 @@ import lodash from 'lodash';
 import deprecate from 'deprecate';
 
 import depcheck from './index';
-import { version } from '../package.json';
+import {
+  version,
+} from '../package.json';
 
 function checkPathExist(dir, errorMessage) {
   return new Promise((resolve, reject) =>
@@ -14,32 +16,32 @@ function checkPathExist(dir, errorMessage) {
 }
 
 function getParsers(parsers) {
-  return lodash.isUndefined(parsers)
-    ? undefined
-    : lodash(parsers)
-      .split(',')
-      .map(keyValuePair => keyValuePair.split(':'))
-      .fromPairs()
-      .mapValues(value => value.split('&').map(name => depcheck.parser[name]))
-      .value();
+  return lodash.isUndefined(parsers) ?
+    undefined :
+    lodash(parsers)
+    .split(',')
+    .map(keyValuePair => keyValuePair.split(':'))
+    .fromPairs()
+    .mapValues(value => value.split('&').map(name => depcheck.parser[name]))
+    .value();
 }
 
 function getDetectors(detectors) {
-  return lodash.isUndefined(detectors)
-    ? undefined
-    : detectors.split(',').map(name => depcheck.detector[name]);
+  return lodash.isUndefined(detectors) ?
+    undefined :
+    detectors.split(',').map(name => depcheck.detector[name]);
 }
 
 function getSpecials(specials) {
-  return lodash.isUndefined(specials)
-    ? undefined
-    : specials.split(',').map(name => depcheck.special[name]);
+  return lodash.isUndefined(specials) ?
+    undefined :
+    specials.split(',').map(name => depcheck.special[name]);
 }
 
 function noIssue(result) {
-  return lodash.isEmpty(result.dependencies)
-      && lodash.isEmpty(result.devDependencies)
-      && lodash.isEmpty(result.missing);
+  return lodash.isEmpty(result.dependencies) &&
+    lodash.isEmpty(result.devDependencies) &&
+    lodash.isEmpty(result.missing);
 }
 
 function prettify(caption, deps) {
@@ -113,8 +115,14 @@ export default function cli(args, log, error, exit) {
       detectors: getDetectors(opt.argv.detectors),
       specials: getSpecials(opt.argv.specials),
     }))
-    .then(result => print(result, log, opt.argv.json))
-    .then(({ dependencies: deps, devDependencies: devDeps }) =>
+    .then((result) => {
+      console.log('exit');
+      return print(result, log, opt.argv.json);
+    })
+    .then(({
+        dependencies: deps,
+        devDependencies: devDeps,
+      }) =>
       exit(opt.argv.json || (deps.length === 0 && devDeps.length) === 0 ? 0 : -1))
     .catch((errorMessage) => {
       error(errorMessage);

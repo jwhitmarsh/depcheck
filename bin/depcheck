@@ -7,6 +7,6 @@ require('../dist/cli')(
   console.log,
   console.error,
   function exit(code) {
-    process.exitCode = code;
-  }
+    process.exit(code);
+  },
 );

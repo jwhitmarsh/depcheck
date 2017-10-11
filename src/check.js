@@ -5,7 +5,9 @@ import walkdir from 'walkdir';
 import minimatch from 'minimatch';
 import builtInModules from 'builtin-modules';
 import requirePackageName from 'require-package-name';
-import { readJSON } from './utils';
+import {
+  readJSON,
+} from './utils';
 
 function isModule(dir) {
   try {
@@ -100,14 +102,14 @@ function getDependencies(dir, filename, deps, parser, detectors) {
     });
   }).then((ast) => {
     // when parser returns string array, skip detector step and treat them as dependencies.
-    const dependencies = lodash.isArray(ast) && ast.every(lodash.isString)
-      ? ast
-      : lodash(getNodes(ast))
-        .map(node => detect(detectors, node))
-        .flatten()
-        .uniq()
-        .map(requirePackageName)
-        .value();
+    const dependencies = lodash.isArray(ast) && ast.every(lodash.isString) ?
+      ast :
+      lodash(getNodes(ast))
+      .map(node => detect(detectors, node))
+      .flatten()
+      .uniq()
+      .map(requirePackageName)
+      .value();
 
     const discover = lodash.partial(discoverPropertyDep, dir, deps);
     const discoverPeerDeps = lodash.partial(discover, 'peerDependencies');
@@ -129,37 +131,41 @@ function checkFile(dir, filename, deps, parsers, detectors) {
   const basename = path.basename(filename);
   const targets = lodash(parsers)
     .keys()
-    .filter(glob => minimatch(basename, glob, { dot: true }))
+    .filter(glob => minimatch(basename, glob, {
+      dot: true,
+    }))
     .map(key => parsers[key])
     .flatten()
     .value();
 
   return targets.map(parser =>
     getDependencies(dir, filename, deps, parser, detectors)
-      .then(using => ({
-        using: {
-          [filename]: lodash(using)
-            .filter(dep => dep && dep !== '.' && dep !== '..') // TODO why need check?
-            .filter(dep => !lodash.includes(builtInModules, dep))
-            .uniq()
-            .value(),
-        },
-      }), error => ({
-        invalidFiles: {
-          [filename]: error,
-        },
-      })));
+    .then(using => ({
+      using: {
+        [filename]: lodash(using)
+          .filter(dep => dep && dep !== '.' && dep !== '..') // TODO why need check?
+          .filter(dep => !lodash.includes(builtInModules, dep))
+          .uniq()
+          .value(),
+      },
+    }), error => ({
+      invalidFiles: {
+        [filename]: error,
+      },
+    })));
 }
 
 function checkDirectory(dir, rootDir, ignoreDirs, deps, parsers, detectors) {
   return new Promise((resolve) => {
     const promises = [];
-    const finder = walkdir(dir, { no_recurse: true });
+    const finder = walkdir(dir, {
+      no_recurse: true,
+    });
 
     finder.on('directory', subdir =>
-      (ignoreDirs.indexOf(path.basename(subdir)) === -1 && !isModule(subdir)
-        ? promises.push(checkDirectory(subdir, rootDir, ignoreDirs, deps, parsers, detectors))
-        : null));
+      (ignoreDirs.indexOf(path.basename(subdir)) === -1 && !isModule(subdir) ?
+        promises.push(checkDirectory(subdir, rootDir, ignoreDirs, deps, parsers, detectors)) :
+        null));
 
     finder.on('file', filename =>
       promises.push(...checkFile(rootDir, filename, deps, parsers, detectors)));
@@ -172,16 +178,18 @@ function checkDirectory(dir, rootDir, ignoreDirs, deps, parsers, detectors) {
       })));
 
     finder.on('end', () =>
-      resolve(Promise.all(promises).then(results =>
-        results.reduce((obj, current) => ({
-          using: mergeBuckets(obj.using, current.using || {}),
-          invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
-          invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
-        }), {
-          using: {},
-          invalidFiles: {},
-          invalidDirs: {},
-        }))));
+      resolve(promises),
+      // resolve(Promise.all(promises).then(results =>
+      //   results.reduce((obj, current) => ({
+      //     using: mergeBuckets(obj.using, current.using || {}),
+      //     invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
+      //     invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
+      //   }), {
+      //     using: {},
+      //     invalidFiles: {},
+      //     invalidDirs: {},
+      //   })))
+    );
   });
 }
 
@@ -221,7 +229,7 @@ function buildResult(result, deps, devDeps, peerDeps, optionalDeps) {
   };
 }
 
-export default function check({
+export default async function check({
   rootDir,
   ignoreDirs,
   deps,
@@ -232,6 +240,32 @@ export default function check({
   detectors,
 }) {
   const allDeps = lodash.union(deps, devDeps);
-  return checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors)
-    .then(result => buildResult(result, deps, devDeps, peerDeps, optionalDeps));
+  const promises = await checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors);
+  let results = await Promise.all(promises);
+  console.log('done');
+  results = results.reduce((obj, current) => ({
+    using: mergeBuckets(obj.using, current.using || {}),
+    invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
+    invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
+  }), {
+    using: {},
+    invalidFiles: {},
+    invalidDirs: {},
+  });
+  return buildResult(results, deps, devDeps, peerDeps, optionalDeps);
+
+  // return checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors)
+  //   .then(promises => Promise.all(promises).then((results) => {
+  //     const reducedResults = results.reduce((obj, current) => ({
+  //       using: mergeBuckets(obj.using, current.using || {}),
+  //       invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
+  //       invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
+  //     }), {
+  //       using: {},
+  //       invalidFiles: {},
+  //       invalidDirs: {},
+  //     });
+  //     return buildResult(reducedResults, deps, devDeps, peerDeps, optionalDeps);
+  //   }));
+  // .then(result => buildResult(result, deps, devDeps, peerDeps, optionalDeps));
 }
