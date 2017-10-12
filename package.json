@@ -53,6 +53,7 @@
     "builtin-modules": "^1.1.1",
     "deprecate": "^1.0.0",
     "deps-regex": "^0.1.4",
+    "glob": "7.1.2",
     "js-yaml": "^3.4.2",
     "lodash": "^4.5.1",
     "minimatch": "^3.0.2",

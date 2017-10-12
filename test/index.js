@@ -79,11 +79,12 @@ describe('depcheck', () => {
 
     it('should capture error', () =>
       check(module, {}).then((unused) => {
-        unused.dependencies.should.deepEqual(unusedDeps);
-        unused.devDependencies.should.deepEqual(unusedDevDeps);
+        // console.log(unused);
+        unused.dependencies.should.deepEqual(unusedDeps, 'dependencies should match');
+        unused.devDependencies.should.deepEqual(unusedDevDeps, 'devDependencies should match');
 
         const invalidDirs = Object.keys(unused.invalidDirs);
-        invalidDirs.should.deepEqual([unreadablePath]);
+        invalidDirs.should.deepEqual([unreadablePath], 'invalidDirs should match');
 
         const error = unused.invalidDirs[invalidDirs[0]];
         error.should.be.instanceof(Error);
@@ -98,16 +99,12 @@ describe('depcheck', () => {
   describe('access unreadable directory', () =>
     testAccessUnreadableDirectory(
       'unreadable',
-      'unreadable',
-      ['unreadable'],
-      []));
+      'unreadable', ['unreadable'], []));
 
   describe('access deep unreadable directory', () =>
     testAccessUnreadableDirectory(
       'unreadable_deep',
-      'deep/nested/unreadable',
-      [],
-      []));
+      'deep/nested/unreadable', ['unreadable-deep'], []));
 
   function testAccessUnreadableFile(
     module, unreadable, unusedDeps, unusedDevDeps) {
@@ -141,9 +138,7 @@ describe('depcheck', () => {
   describe('access unreadable file', () =>
     testAccessUnreadableFile(
       'unreadable',
-      'unreadable.js',
-      ['unreadable'],
-      []));
+      'unreadable.js', ['unreadable'], []));
 
   function testCustomPluggableComponents(module, options) {
     return check(module, options).then((unused) => {

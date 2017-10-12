@@ -5,9 +5,7 @@ import lodash from 'lodash';
 import deprecate from 'deprecate';
 
 import depcheck from './index';
-import {
-  version,
-} from '../package.json';
+import { version } from '../package.json';
 
 function checkPathExist(dir, errorMessage) {
   return new Promise((resolve, reject) =>
@@ -115,10 +113,7 @@ export default function cli(args, log, error, exit) {
       detectors: getDetectors(opt.argv.detectors),
       specials: getSpecials(opt.argv.specials),
     }))
-    .then((result) => {
-      console.log('exit');
-      return print(result, log, opt.argv.json);
-    })
+    .then(result => print(result, log, opt.argv.json))
     .then(({
         dependencies: deps,
         devDependencies: devDeps,

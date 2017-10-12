@@ -1,22 +1,23 @@
+/* eslint-disable no-param-reassign */
+
 import fs from 'fs';
 import path from 'path';
 import lodash from 'lodash';
-import walkdir from 'walkdir';
+// import walkdir from 'walkdir';
 import minimatch from 'minimatch';
 import builtInModules from 'builtin-modules';
 import requirePackageName from 'require-package-name';
-import {
-  readJSON,
-} from './utils';
+import glob from 'glob';
+import { readJSON } from './utils';
 
-function isModule(dir) {
-  try {
-    readJSON(path.resolve(dir, 'package.json'));
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
+// function isModule(dir) {
+//   try {
+//     readJSON(path.resolve(dir, 'package.json'));
+//     return true;
+//   } catch (error) {
+//     return false;
+//   }
+// }
 
 function mergeBuckets(object1, object2) {
   return lodash.mergeWith(object1, object2, (value1, value2) => {
@@ -131,9 +132,7 @@ function checkFile(dir, filename, deps, parsers, detectors) {
   const basename = path.basename(filename);
   const targets = lodash(parsers)
     .keys()
-    .filter(glob => minimatch(basename, glob, {
-      dot: true,
-    }))
+    .filter(globb => minimatch(basename, globb, { dot: true }))
     .map(key => parsers[key])
     .flatten()
     .value();
@@ -155,41 +154,54 @@ function checkFile(dir, filename, deps, parsers, detectors) {
     })));
 }
 
-function checkDirectory(dir, rootDir, ignoreDirs, deps, parsers, detectors) {
+// function xcheckDirectory(dir, rootDir, ignoreDirs, deps, parsers, detectors, promises) {
+//   return new Promise((resolve) => {
+//     console.log(dir);
+//     if (!promises) {
+//       promises = [];
+//     }
+//
+//     const finder = walkdir(dir, { no_recurse: true });
+//
+//     finder.on('directory', async (subdir) => {
+//       if (ignoreDirs.indexOf(path.basename(subdir)) === -1 && !isModule(subdir)) {
+//         const checkProms = await checkDirectory(subdir, rootDir, ignoreDirs, deps, parsers, detectors, promises);
+//         promises.push(checkProms);
+//       }
+//     });
+//
+//     finder.on('file', async (filename) => {
+//       console.log(filename);
+//       promises.push(...checkFile(rootDir, filename, deps, parsers, detectors));
+//     });
+//
+//     finder.on('error', (dirPath, error) => {
+//       promises.push(Promise.resolve({
+//         invalidDirs: {
+//           [dirPath]: error,
+//         },
+//       }));
+//     });
+//
+//     finder.on('end', () => {
+//       console.log('end', dir);
+//       resolve(promises);
+//     });
+//   });
+// }
+
+function checkDirectory(dir, rootDir, ignoreDirs) {
   return new Promise((resolve) => {
-    const promises = [];
-    const finder = walkdir(dir, {
-      no_recurse: true,
+    glob(`${rootDir}/**/*`, { ignore: ignoreDirs, silent: true }, (error, files) => {
+      if (error) {
+        resolve([{
+          invalidDirs: {
+            [error.path]: error,
+          },
+        }]);
+      }
+      resolve(files);
     });
-
-    finder.on('directory', subdir =>
-      (ignoreDirs.indexOf(path.basename(subdir)) === -1 && !isModule(subdir) ?
-        promises.push(checkDirectory(subdir, rootDir, ignoreDirs, deps, parsers, detectors)) :
-        null));
-
-    finder.on('file', filename =>
-      promises.push(...checkFile(rootDir, filename, deps, parsers, detectors)));
-
-    finder.on('error', (dirPath, error) =>
-      promises.push(Promise.resolve({
-        invalidDirs: {
-          [dirPath]: error,
-        },
-      })));
-
-    finder.on('end', () =>
-      resolve(promises),
-      // resolve(Promise.all(promises).then(results =>
-      //   results.reduce((obj, current) => ({
-      //     using: mergeBuckets(obj.using, current.using || {}),
-      //     invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
-      //     invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
-      //   }), {
-      //     using: {},
-      //     invalidFiles: {},
-      //     invalidDirs: {},
-      //   })))
-    );
   });
 }
 
@@ -240,32 +252,27 @@ export default async function check({
   detectors,
 }) {
   const allDeps = lodash.union(deps, devDeps);
-  const promises = await checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors);
-  let results = await Promise.all(promises);
-  console.log('done');
-  results = results.reduce((obj, current) => ({
+  const filenames = await checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors);
+  const promises = filenames.reduce((proms, filename) => {
+    if (typeof filename === 'string') {
+      proms.push(...checkFile(rootDir, filename, deps, parsers, detectors));
+    } else {
+      proms.push(filename);
+    }
+
+    return proms;
+  }, []);
+
+  const results = await Promise.all(promises);
+  const parsedResults = results.reduce((obj, current) => ({
     using: mergeBuckets(obj.using, current.using || {}),
-    invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
-    invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
+    invalidFiles: Object.assign({}, obj.invalidFiles, current.invalidFiles),
+    invalidDirs: Object.assign({}, obj.invalidDirs, current.invalidDirs),
   }), {
     using: {},
     invalidFiles: {},
     invalidDirs: {},
   });
-  return buildResult(results, deps, devDeps, peerDeps, optionalDeps);
-
-  // return checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors)
-  //   .then(promises => Promise.all(promises).then((results) => {
-  //     const reducedResults = results.reduce((obj, current) => ({
-  //       using: mergeBuckets(obj.using, current.using || {}),
-  //       invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
-  //       invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
-  //     }), {
-  //       using: {},
-  //       invalidFiles: {},
-  //       invalidDirs: {},
-  //     });
-  //     return buildResult(reducedResults, deps, devDeps, peerDeps, optionalDeps);
-  //   }));
-  // .then(result => buildResult(result, deps, devDeps, peerDeps, optionalDeps));
+  const builtResult = buildResult(parsedResults, deps, devDeps, peerDeps, optionalDeps);
+  return builtResult;
 }
