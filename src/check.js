@@ -88,44 +88,37 @@ function discoverPropertyDep(rootDir, deps, property, depName) {
   }
 }
 
-function getDependencies(dir, filename, deps, parser, detectors) {
-  return new Promise((resolve, reject) => {
-    fs.readFile(filename, 'utf8', (error, content) => {
-      if (error) {
-        reject(error);
-      }
+async function getDependencies(dir, filename, content, deps, parser, detectors) {
+  let ast;
+  try {
+    ast = parser(content, filename, deps, dir);
+  } catch (syntaxError) {
+    return syntaxError;
+  }
 
-      try {
-        resolve(parser(content, filename, deps, dir));
-      } catch (syntaxError) {
-        reject(syntaxError);
-      }
-    });
-  }).then((ast) => {
-    // when parser returns string array, skip detector step and treat them as dependencies.
-    const dependencies = lodash.isArray(ast) && ast.every(lodash.isString) ?
-      ast :
-      lodash(getNodes(ast))
-      .map(node => detect(detectors, node))
-      .flatten()
-      .uniq()
-      .map(requirePackageName)
-      .value();
+  // when parser returns string array, skip detector step and treat them as dependencies.
+  const dependencies = lodash.isArray(ast) && ast.every(lodash.isString) ?
+    ast :
+    lodash(getNodes(ast))
+    .map(node => detect(detectors, node))
+    .flatten()
+    .uniq()
+    .map(requirePackageName)
+    .value();
 
-    const discover = lodash.partial(discoverPropertyDep, dir, deps);
-    const discoverPeerDeps = lodash.partial(discover, 'peerDependencies');
-    const discoverOptionalDeps = lodash.partial(discover, 'optionalDependencies');
-    const peerDeps = lodash(dependencies)
-      .map(discoverPeerDeps)
-      .flatten()
-      .value();
-    const optionalDeps = lodash(dependencies)
-      .map(discoverOptionalDeps)
-      .flatten()
-      .value();
+  const discover = lodash.partial(discoverPropertyDep, dir, deps);
+  const discoverPeerDeps = lodash.partial(discover, 'peerDependencies');
+  const discoverOptionalDeps = lodash.partial(discover, 'optionalDependencies');
+  const peerDeps = lodash(dependencies)
+    .map(discoverPeerDeps)
+    .flatten()
+    .value();
+  const optionalDeps = lodash(dependencies)
+    .map(discoverOptionalDeps)
+    .flatten()
+    .value();
 
-    return dependencies.concat(peerDeps).concat(optionalDeps);
-  });
+  return dependencies.concat(peerDeps).concat(optionalDeps);
 }
 
 function checkFile(dir, filename, deps, parsers, detectors) {
@@ -137,8 +130,15 @@ function checkFile(dir, filename, deps, parsers, detectors) {
     .flatten()
     .value();
 
+  let fileContent;
+  try {
+    fileContent = fs.readFileSync(filename);
+  } catch (err) {
+    return [];
+  }
+
   return targets.map(parser =>
-    getDependencies(dir, filename, deps, parser, detectors)
+    getDependencies(dir, filename, fileContent, deps, parser, detectors)
     .then(using => ({
       using: {
         [filename]: lodash(using)
@@ -192,7 +192,7 @@ function checkFile(dir, filename, deps, parsers, detectors) {
 
 function checkDirectory(dir, rootDir, ignoreDirs) {
   return new Promise((resolve) => {
-    glob(`${rootDir}/**/*`, { ignore: ignoreDirs, silent: true }, (error, files) => {
+    glob(`${rootDir}/**/*`, { ignore: ['**/node_modules/**'].concat(ignoreDirs), silent: true }, (error, files) => {
       if (error) {
         resolve([{
           invalidDirs: {
@@ -252,7 +252,11 @@ export default async function check({
   detectors,
 }) {
   const allDeps = lodash.union(deps, devDeps);
+  console.time('files');
   const filenames = await checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors);
+  console.timeEnd('files');
+
+  console.time('reduce');
   const promises = filenames.reduce((proms, filename) => {
     if (typeof filename === 'string') {
       proms.push(...checkFile(rootDir, filename, deps, parsers, detectors));
@@ -262,8 +266,12 @@ export default async function check({
 
     return proms;
   }, []);
+  console.timeEnd('reduce');
 
+  console.time('proms');
   const results = await Promise.all(promises);
+  console.timeEnd('proms');
+
   const parsedResults = results.reduce((obj, current) => ({
     using: mergeBuckets(obj.using, current.using || {}),
     invalidFiles: Object.assign({}, obj.invalidFiles, current.invalidFiles),
@@ -273,6 +281,10 @@ export default async function check({
     invalidFiles: {},
     invalidDirs: {},
   });
+
+  console.time('buildres');
   const builtResult = buildResult(parsedResults, deps, devDeps, peerDeps, optionalDeps);
+  console.timeEnd('buildres');
+
   return builtResult;
 }
