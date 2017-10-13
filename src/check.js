@@ -1,23 +1,20 @@
-/* eslint-disable no-param-reassign */
-
 import fs from 'fs';
 import path from 'path';
 import lodash from 'lodash';
-// import walkdir from 'walkdir';
+import walkdir from 'walkdir';
 import minimatch from 'minimatch';
 import builtInModules from 'builtin-modules';
 import requirePackageName from 'require-package-name';
-import glob from 'glob';
 import { readJSON } from './utils';
 
-// function isModule(dir) {
-//   try {
-//     readJSON(path.resolve(dir, 'package.json'));
-//     return true;
-//   } catch (error) {
-//     return false;
-//   }
-// }
+function isModule(dir) {
+  try {
+    readJSON(path.resolve(dir, 'package.json'));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
 
 function mergeBuckets(object1, object2) {
   return lodash.mergeWith(object1, object2, (value1, value2) => {
@@ -87,13 +84,79 @@ function discoverPropertyDep(rootDir, deps, property, depName) {
     return [];
   }
 }
+//
+// function getDependencies(dir, filename, deps, parser, detectors) {
+//   return new Promise((resolve, reject) => {
+//     fs.readFile(filename, 'utf8', (error, content) => {
+//       if (error) {
+//         reject(error);
+//       }
+//
+//       try {
+//         resolve(parser(content, filename, deps, dir));
+//       } catch (syntaxError) {
+//         reject(syntaxError);
+//       }
+//     });
+//   }).then((ast) => {
+//     // when parser returns string array, skip detector step and treat them as dependencies.
+//     const dependencies = lodash.isArray(ast) && ast.every(lodash.isString) ?
+//       ast :
+//       lodash(getNodes(ast))
+//       .map(node => detect(detectors, node))
+//       .flatten()
+//       .uniq()
+//       .map(requirePackageName)
+//       .value();
+//
+//     const discover = lodash.partial(discoverPropertyDep, dir, deps);
+//     const discoverPeerDeps = lodash.partial(discover, 'peerDependencies');
+//     const discoverOptionalDeps = lodash.partial(discover, 'optionalDependencies');
+//     const peerDeps = lodash(dependencies)
+//       .map(discoverPeerDeps)
+//       .flatten()
+//       .value();
+//     const optionalDeps = lodash(dependencies)
+//       .map(discoverOptionalDeps)
+//       .flatten()
+//       .value();
+//
+//     return dependencies.concat(peerDeps).concat(optionalDeps);
+//   });
+// }
+//
+// function checkFile(dir, filename, deps, parsers, detectors) {
+//   const basename = path.basename(filename);
+//   const targets = lodash(parsers)
+//     .keys()
+//     .filter(glob => minimatch(basename, glob, { dot: true }))
+//     .map(key => parsers[key])
+//     .flatten()
+//     .value();
+//
+//   return targets.map(parser =>
+//     getDependencies(dir, filename, deps, parser, detectors)
+//     .then(using => ({
+//       using: {
+//         [filename]: lodash(using)
+//           .filter(dep => dep && dep !== '.' && dep !== '..') // TODO why need check?
+//           .filter(dep => !lodash.includes(builtInModules, dep))
+//           .uniq()
+//           .value(),
+//       },
+//     }), error => ({
+//       invalidFiles: {
+//         [filename]: error,
+//       },
+//     })));
+// }
 
-async function getDependencies(dir, filename, content, deps, parser, detectors) {
+function getDependencies(dir, filename, filecontents, deps, parser, detectors) {
   let ast;
   try {
-    ast = parser(content, filename, deps, dir);
+    ast = parser(filecontents, filename, deps, dir);
   } catch (syntaxError) {
-    return syntaxError;
+    throw syntaxError;
   }
 
   // when parser returns string array, skip detector step and treat them as dependencies.
@@ -125,83 +188,115 @@ function checkFile(dir, filename, deps, parsers, detectors) {
   const basename = path.basename(filename);
   const targets = lodash(parsers)
     .keys()
-    .filter(globb => minimatch(basename, globb, { dot: true }))
+    .filter(glob => minimatch(basename, glob, { dot: true }))
     .map(key => parsers[key])
     .flatten()
     .value();
 
-  let fileContent;
-  try {
-    fileContent = fs.readFileSync(filename);
-  } catch (err) {
-    return [];
-  }
+  return new Promise((resolve) => {
+    fs.readFile(filename, 'utf8', (readErr, filecontents) => {
+      const mapped = [];
+      if (readErr) {
+        mapped.push({
+          invalidFiles: {
+            [filename]: readErr,
+          },
+        });
+      }
 
-  return targets.map(parser =>
-    getDependencies(dir, filename, fileContent, deps, parser, detectors)
-    .then(using => ({
-      using: {
-        [filename]: lodash(using)
-          .filter(dep => dep && dep !== '.' && dep !== '..') // TODO why need check?
-          .filter(dep => !lodash.includes(builtInModules, dep))
-          .uniq()
-          .value(),
-      },
-    }), error => ({
-      invalidFiles: {
-        [filename]: error,
-      },
-    })));
+      mapped.push(...targets.map((parser) => {
+        let using;
+        try {
+          using = getDependencies(dir, filename, filecontents, deps, parser, detectors);
+        } catch (err) {
+          return {
+            invalidFiles: {
+              [filename]: err,
+            },
+          };
+        }
+        return {
+          using: {
+            [filename]: lodash(using)
+              .filter(dep => dep && dep !== '.' && dep !== '..') // TODO why need check?
+              .filter(dep => !lodash.includes(builtInModules, dep))
+              .uniq()
+              .value(),
+          },
+        };
+      }));
+      // console.log(mapped);
+      resolve(mapped);
+    });
+  });
+
+  // let filecontents;
+  // const mapped = [];
+  // try {
+  //   filecontents = fs.readFileSync(filename, 'utf8');
+  // } catch (err) {
+  //   mapped.push({
+  //     invalidFiles: {
+  //       [filename]: err,
+  //     },
+  //   });
+  // }
+  //
+  // mapped.push(...targets.map((parser) => {
+  //   let using;
+  //   try {
+  //     using = getDependencies(dir, filename, filecontents, deps, parser, detectors);
+  //   } catch (err) {
+  //     return {
+  //       invalidFiles: {
+  //         [filename]: err,
+  //       },
+  //     };
+  //   }
+  //   return {
+  //     using: {
+  //       [filename]: lodash(using)
+  //         .filter(dep => dep && dep !== '.' && dep !== '..') // TODO why need check?
+  //         .filter(dep => !lodash.includes(builtInModules, dep))
+  //         .uniq()
+  //         .value(),
+  //     },
+  //   };
+  // }));
+  // return mapped;
 }
 
-// function xcheckDirectory(dir, rootDir, ignoreDirs, deps, parsers, detectors, promises) {
-//   return new Promise((resolve) => {
-//     console.log(dir);
-//     if (!promises) {
-//       promises = [];
-//     }
-//
-//     const finder = walkdir(dir, { no_recurse: true });
-//
-//     finder.on('directory', async (subdir) => {
-//       if (ignoreDirs.indexOf(path.basename(subdir)) === -1 && !isModule(subdir)) {
-//         const checkProms = await checkDirectory(subdir, rootDir, ignoreDirs, deps, parsers, detectors, promises);
-//         promises.push(checkProms);
-//       }
-//     });
-//
-//     finder.on('file', async (filename) => {
-//       console.log(filename);
-//       promises.push(...checkFile(rootDir, filename, deps, parsers, detectors));
-//     });
-//
-//     finder.on('error', (dirPath, error) => {
-//       promises.push(Promise.resolve({
-//         invalidDirs: {
-//           [dirPath]: error,
-//         },
-//       }));
-//     });
-//
-//     finder.on('end', () => {
-//       console.log('end', dir);
-//       resolve(promises);
-//     });
-//   });
-// }
-
-function checkDirectory(dir, rootDir, ignoreDirs) {
+function checkDirectory(dir, rootDir, ignoreDirs, deps, parsers, detectors) {
   return new Promise((resolve) => {
-    glob(`${rootDir}/**/*`, { ignore: ['**/node_modules/**'].concat(ignoreDirs), silent: true }, (error, files) => {
-      if (error) {
-        resolve([{
-          invalidDirs: {
-            [error.path]: error,
-          },
-        }]);
-      }
-      resolve(files);
-    });
+    const promises = [];
+    const finder = walkdir(dir, { no_recurse: true });
+
+    finder.on('directory', subdir =>
+      (ignoreDirs.indexOf(path.basename(subdir)) === -1 && !isModule(subdir) ?
+        promises.push(checkDirectory(subdir, rootDir, ignoreDirs, deps, parsers, detectors)) :
+        null));
+
+    finder.on('file', filename =>
+      promises.push(checkFile(rootDir, filename, deps, parsers, detectors)));
+
+    finder.on('error', (dirPath, error) =>
+      promises.push(Promise.resolve({
+        invalidDirs: {
+          [dirPath]: error,
+        },
+      })));
+
+    finder.on('end', () =>
+      resolve(Promise.all(promises).then(results =>
+        results.reduce((obj, current) => ({
+          using: mergeBuckets(obj.using, current.using || {}),
+          invalidFiles: Object.assign(obj.invalidFiles, current.invalidFiles),
+          invalidDirs: Object.assign(obj.invalidDirs, current.invalidDirs),
+        }), {
+          using: {},
+          invalidFiles: {},
+          invalidDirs: {},
+        }))));
   });
 }
 
@@ -241,7 +336,7 @@ function buildResult(result, deps, devDeps, peerDeps, optionalDeps) {
   };
 }
 
-export default async function check({
+export default function check({
   rootDir,
   ignoreDirs,
   deps,
@@ -252,39 +347,6 @@ export default async function check({
   detectors,
 }) {
   const allDeps = lodash.union(deps, devDeps);
-  console.time('files');
-  const filenames = await checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors);
-  console.timeEnd('files');
-
-  console.time('reduce');
-  const promises = filenames.reduce((proms, filename) => {
-    if (typeof filename === 'string') {
-      proms.push(...checkFile(rootDir, filename, deps, parsers, detectors));
-    } else {
-      proms.push(filename);
-    }
-
-    return proms;
-  }, []);
-  console.timeEnd('reduce');
-
-  console.time('proms');
-  const results = await Promise.all(promises);
-  console.timeEnd('proms');
-
-  const parsedResults = results.reduce((obj, current) => ({
-    using: mergeBuckets(obj.using, current.using || {}),
-    invalidFiles: Object.assign({}, obj.invalidFiles, current.invalidFiles),
-    invalidDirs: Object.assign({}, obj.invalidDirs, current.invalidDirs),
-  }), {
-    using: {},
-    invalidFiles: {},
-    invalidDirs: {},
-  });
-
-  console.time('buildres');
-  const builtResult = buildResult(parsedResults, deps, devDeps, peerDeps, optionalDeps);
-  console.timeEnd('buildres');
-
-  return builtResult;
+  return checkDirectory(rootDir, rootDir, ignoreDirs, allDeps, parsers, detectors)
+    .then(result => buildResult(result, deps, devDeps, peerDeps, optionalDeps));
 }

@@ -210,7 +210,7 @@ describe('depcheck', () => {
       ],
     }));
 
-  it('should handle other parsers even one throws exception', () =>
+  it.only('should handle other parsers even one throws exception', () =>
     check('import_list', {
       parsers: {
         '*.txt': [
